@@ -1,80 +1,66 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from scipy.interpolate import interp1d
 
 
-def calculate_hill_slope_ic50(concentrations, activities, sample_num):
+def calculate_ic50_4pl(concentrations, activities, name):
     """
-    Calculate the Hill Slope, IC50, and AC50 from given concentration-response data.
+    使用四参数逻辑回归（4PL）计算 IC50，并绘制浓度-活性曲线。
 
-    Parameters:
-    concentrations (array-like): A list or numpy array of compound concentrations (μM).
-    activities (array-like): A list or numpy array of corresponding FP-Activity values.
+    参数：
+    concentrations (array-like): 测试分子的浓度数组（μM）。
+    activities (array-like): 对应的 FP 活性数据。
+    name (str): 保存图片的文件名。
 
-    Returns:
-    dict: A dictionary containing the Hill Slope, EC50, IC50, and AC50 values.
+    返回：
+    dict: 包含 IC50、EC50、Hill 斜率的字典。
     """
-    print(sample_num)
-    # Define the Hill equation
-    def hill_equation(concentration, Emax, EC50, hill_slope):
-        return Emax * (concentration ** hill_slope) / (EC50 ** hill_slope + concentration ** hill_slope)
 
-    # Automatically determine initial parameters p0
+    # 定义 4PL 逻辑回归函数
+    def four_param_logistic(x, A, B, IC50, H):
+        return A + (B - A) / (1 + (x / IC50) ** H)
+
+    # 估计初始参数 p0
     def auto_p0(concentrations, activities):
-        Emax_init = min(activities)  # Maximum inhibition effect
-        EC50_init = np.median(concentrations)  # Median concentration as starting EC50
-        Hill_Slope_init = 1  # Default Hill Slope
-        return [Emax_init, EC50_init, Hill_Slope_init]
+        A_init = min(activities)  # 最低活性（最大抑制）
+        B_init = max(activities)  # 最高活性（未抑制）
+        IC50_init = np.median(concentrations)  # 中位数作为 IC50 初值
+        Hill_Slope_init = 1  # 斜率初值
+        return [A_init, B_init, IC50_init, Hill_Slope_init]
 
-    # Fit the data using the Hill equation
+    # 进行 4PL 拟合
     try:
         p0 = auto_p0(concentrations, activities)
-        popt, _ = curve_fit(hill_equation, concentrations, activities, p0=p0)
-        Emax_fit, EC50_fit, hill_slope_fit = popt
+        popt, _ = curve_fit(four_param_logistic, concentrations, activities, p0=p0, maxfev=10000)
+        A_fit, B_fit, IC50_fit, Hill_fit = popt
     except RuntimeError:
-        print("Curve fitting failed. Check data quality.")
-        return np.nan, np.nan, np.nan, np.nan
-        #return {"Error": "Curve fitting failed. Check data quality."}
+        print("⚠️ 4PL 拟合失败，请检查数据质量！")
+        return {"Error": "Curve fitting failed"}
 
-    # Compute IC50 using interpolation
-    min_activity = min(activities)
-    max_activity = max(activities)
-    target_activity = (max_activity + min_activity) / 2  # 50% inhibition level
+    # 生成浓度范围
+    concentration_range = np.logspace(np.log10(min(concentrations)), np.log10(max(concentrations)), 100)
+    fitted_activities = four_param_logistic(concentration_range, *popt)
 
-    try:
-        interp_func = interp1d(activities, concentrations, kind='linear', fill_value="extrapolate")
-        IC50_fit = interp_func(target_activity)
-    except ValueError:
-        IC50_fit = np.nan  # Assign NaN if interpolation fails
-
-    # Compute AC50 (alternative method, based on midpoint response)
-    try:
-        ac50_func = interp1d(activities, concentrations, kind='linear', fill_value="extrapolate")
-        AC50_fit = ac50_func(0)  # Midpoint activity (50% effect level)
-    except ValueError:
-        AC50_fit = np.nan
-
-    # Generate fitted curve
-    concentration_range = np.logspace(np.log10(concentrations.min()), np.log10(concentrations.max()), 100)
-    fitted_activities = hill_equation(concentration_range, *popt)
-
-    # Plot the concentration-response curve
+    # 绘制拟合曲线
     plt.figure(figsize=(8, 6))
     plt.plot(concentrations, activities, 'o', label='Observed Data', markersize=8)
-    plt.plot(concentration_range, fitted_activities, '-', label='Fitted Hill Curve')
+    plt.plot(concentration_range, fitted_activities, '-', label='Fitted 4PL Curve', color='red')
     plt.xscale('log')
     plt.xlabel('Concentration (μM)')
     plt.ylabel('FP-Activity')
-    plt.title('Concentration-Response Curve (Hill Fit)')
+    plt.title(f'4PL Fit - {name}')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f'hillslope\\{sample_num}.png')
+    plt.savefig(f'C:\\Users\\syan\\Documents\\record\\phd\\2025\\pin1-few-shot\\PIN1Screen\\{name}.png')
 
-    print(hill_slope_fit)
-    print(AC50_fit)
-    print(EC50_fit)
-    print(IC50_fit)
-    # Return results as a dictionary
-    return hill_slope_fit, EC50_fit, IC50_fit, AC50_fit
+    print(f"📌 IC50: {IC50_fit:.3f} μM")
+    print(f"📌 Hill Slope: {Hill_fit:.3f}")
+
+    return IC50_fit, Hill_fit
+
+
+# 示例用法：
+concentrations = np.array([0.1, 0.3, 1, 3, 10, 30, 100])  # 浓度数据
+activities = np.array([90, 75, 50, 30, 20, 10, 5])  # 活性数据
+calculate_ic50_4pl(concentrations, activities, "Example_Molecule")
